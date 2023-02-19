@@ -11,14 +11,18 @@ error Unauthorized();
 contract SubscriptionFunction {
     struct dataInfo {
         string descirption;
-        uint256 charges;
+        string charges;
+        string playback;
     }
-
+    event subscribe(string playback);
+    event livesubscribe(string liveplay);
     using CFAv1Library for CFAv1Library.InitData;
     CFAv1Library.InitData public cfaV1;
 
     mapping(address => mapping(string => dataInfo)) public dataProviders;
     mapping(string => address[]) public subscriptions;
+    mapping(address => string) liveStream;
+    mapping(string => address[]) liveSubscriptions;
 
     constructor(ISuperfluid _host) {
         //initialize InitData struct, and set equal to cfaV1
@@ -36,6 +40,76 @@ contract SubscriptionFunction {
             )
         );
     }
+ function checkLiveSubscription(string memory uid) public view returns (bool) {
+        // Get the subscriptions array for the given key
+        address[] storage subs = liveSubscriptions[uid];
+
+        // Find the index of the subscriber address in the subscriptions array
+        uint index = indexOf(subs, msg.sender);
+
+        // If the subscriber address is not in the subscriptions array, return false
+        if (index == subs.length) {
+            return false;
+        }
+        // Otherwise, return true
+        return true;
+    }
+
+    function addLive(
+        string memory pb
+    ) public {
+        // Check that the uid is not an empty string
+        if (bytes(pb).length == 0) {
+            revert("UID cannot be an empty string");
+        }
+        // Store the new dataInfo struct in the dataProviders mapping
+        liveStream[msg.sender] = pb;
+    }
+
+    function deleteLive(
+        string memory pb
+    ) public {
+        // Check that the uid is not an empty string
+        if (bytes(pb).length == 0) {
+            revert("UID cannot be an empty string");
+        }
+        // Store the new dataInfo struct in the dataProviders mapping
+        delete liveStream[msg.sender];
+    }
+
+    function createLiveStream(
+        int96 flowRate,
+        ISuperToken token,
+        address receiver,
+        string memory uid
+    ) external {
+        // Create stream
+        cfaV1.createFlowByOperator(msg.sender, receiver, token, flowRate);
+        liveSubscriptions[uid].push(msg.sender);
+        emit livesubscribe(liveStream[receiver]);
+    }
+
+    function deleteLiveStream(
+        ISuperToken token,
+        address receiver,
+        string memory uid
+    ) external {
+        // Get the subscriptions array for the given key
+        address[] storage subs = liveSubscriptions[uid];
+
+        // Find the index of the subscriber address in the subscriptions array
+        uint index = indexOf(subs, msg.sender);
+
+        // If the subscriber address is not in the subscriptions array, return
+        if (index == subs.length) {
+            revert("Not Subscribed");
+        }
+
+        // Remove the subscriber address from the subscriptions array
+        remove(subs, index);
+        cfaV1.deleteFlowByOperator(msg.sender, receiver, token);
+    }
+
 
     function createStream(
         int96 flowRate,
@@ -46,6 +120,7 @@ contract SubscriptionFunction {
         // Create stream
         cfaV1.createFlowByOperator(msg.sender, receiver, token, flowRate);
         subscriptions[uid].push(msg.sender);
+        emit subscribe(dataProviders[receiver][uid].playback);
     }
 
     function indexOf(
@@ -109,7 +184,8 @@ contract SubscriptionFunction {
     function addData(
         string memory uid,
         string memory description,
-        uint256 charges
+        string memory playback,
+        string memory charges
     ) public {
         // Check that the uid is not an empty string
         if (bytes(uid).length == 0) {
@@ -121,18 +197,13 @@ contract SubscriptionFunction {
             revert("Description cannot be an empty string");
         }
 
-        // Check that the charges are non-zero
-        if (charges == 0) {
-            revert("Charges must be non-zero");
-        }
-
         // Check that the caller does not already have a dataInfo struct with the given uid
         if (bytes(dataProviders[msg.sender][uid].descirption).length != 0) {
             revert("Data with this UID already exists for this address");
         }
 
         // Create a new dataInfo struct with the given description and charges
-        dataInfo memory newInfo = dataInfo(description, charges);
+        dataInfo memory newInfo = dataInfo(description, charges, playback);
 
         // Store the new dataInfo struct in the dataProviders mapping
         dataProviders[msg.sender][uid] = newInfo;
